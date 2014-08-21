@@ -84,7 +84,7 @@ class CaseSweep(object):
                         
                 i += 1
                 
-    def writeSessionFile(self, sessionFileName):
+    def writeSessionFile(self, sessionFileName, designPointIndex):
         '''
         Method to write out a CFD-Post session file. In the base class this is
         not implemented because it is highly dependent on the CFD cases that
@@ -98,7 +98,8 @@ class CaseSweep(object):
         Steps through list of cases and runs the session file on the case results
         '''
         #Step through design points
-        for designPoint in self.sweepDict[designPointColumnName]:
+        for dpIndex in range(len(self.sweepDict[designPointColumnName])):
+            designPoint = self.sweepDict[designPointColumnName][dpIndex]
             #Determine the working directory
             if designPoint == 'Current':
                 designPoint = 'dp0'
@@ -120,7 +121,7 @@ class CaseSweep(object):
                     
             #Write a session file
             sessionFileName = 'Post' + str(designPoint) + '.cse'
-            self.writeSessionFile(sessionFileName)
+            self.writeSessionFile(sessionFileName, dpIndex)
             
             #Call CFD-Post on the results file
             runSessionOnResultsFile(sessionFileName, resultsFile)
