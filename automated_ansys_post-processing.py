@@ -23,11 +23,19 @@ def runSessionOnResultsFile(sessionFileName, resultsFileName):
 ################################################################################
 
 class SessionFile(object):
-    def __init__(self, sections=[]):
+    '''
+    Object defining an Ansys CFD-Post session file.  Each section of the session
+    file is defined by its respective object and should be added to the list of
+    sections "self.sections".  Be default, this is initialized to None
+    '''
+    def __init__(self, sections=None):
         self.sections = sections
         
     def addSection(self, section):
-        self.sections.append(section)
+        if self.sections != None:
+            self.sections.append(section)
+        else:
+            self.sections = [section]
         
     def getDefinition(self):
         sessionDef = [ 'COMMAND FILE:',
