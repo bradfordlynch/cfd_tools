@@ -5,7 +5,13 @@
 #Stadia42, Bradford Lynch, 2014, Chicago, IL
 
 ################################################################################
-import subprocess
+import subprocess, csv, os
+
+################################################################################
+
+#General helper functions
+
+################################################################################
 
 def runSessionOnResultsFile(sessionFileName, resultsFileName):
     '''
@@ -15,6 +21,114 @@ def runSessionOnResultsFile(sessionFileName, resultsFileName):
     subprocess.call(['cfx5post', '-batch', sessionFileName, resultsFileName], shell=True)
 
     return
+    
+################################################################################
+
+#Objects for defining cases of CFD runs
+
+################################################################################
+
+class CaseSweep(object):
+    '''
+    Object defining a sweep of different CFD cases. The sweepDefinitionFile must
+    be a CSV file with a table of the cases that were run
+    '''
+    def __init__(self, sweepDefinitionFile, rootDirectory, modelName):
+        self.sweepFile = sweepDefinitionFile
+        self.rootDir = rootDirectory
+        self.modelName = modelName
+        self.sweepHeaders = {}
+        self.sweepDict = {}
+
+        #Read sweep definition file
+        self.readSweepDefFile()
+        
+    def readSweepDefFile(self):
+        '''
+        Reads the sweep definition file into two dictionaries. The first uses
+        the column index of the CSV file as a key to the column name. The 
+        second uses the column name as a key to the list of values in the column
+        
+        sweepHeaders contains the Column Index -> Column Name
+        sweepDict contains the Column Name -> List of Values
+        '''
+        i = 0
+        with open(self.sweepFile, 'rb') as csvFile:
+            sweepData = csv.reader(csvFile, delimiter=',')
+            
+            for row in sweepData:
+                if i == 0:
+                    #This is the header row. Use values for keys in sweepDict
+                    col = 0
+                    for cell in row:
+                        self.sweepHeaders[col] = cell
+                        self.sweepDict[cell] = []
+                        col += 1
+
+                elif i == 1:
+                    #This is the units row. Do nothing for now
+                    pass
+                else:
+                    col = 0
+                    for cell in row:
+                        try:
+                            #Try to convert the cell value to a float
+                            cell = float(cell)
+                        except ValueError:
+                            #Leave the value alone if it is not a float
+                            pass
+                        
+                        self.sweepDict[self.sweepHeaders[col]].append(cell)
+
+                        col += 1
+                        
+                i += 1
+                
+    def writeSessionFile(self, sessionFileName):
+        '''
+        Method to write out a CFD-Post session file. In the base class this is
+        not implemented because it is highly dependent on the CFD cases that
+        were run.
+        '''
+        
+        raise NotImplementedError
+        
+    def processResults(self, designPointColumnName):
+        '''
+        Steps through list of cases and runs the session file on the case results
+        '''
+        #Step through design points
+        for designPoint in self.sweepDict[designPointColumnName]:
+            #Determine the working directory
+            if designPoint == 'Current':
+                designPoint = 'dp0'
+                dpDir = self.rootDir + self.modelName + '_files'
+                
+            else:
+                designPoint = designPoint.replace(' ', '').lower()
+                dpDir = self.rootDir + self.modelName + designPoint + '_files'
+                
+            #Change to the design point directory, then to the results directory
+            os.chdir(dpDir)
+            os.chdir(designPoint + '\\CFX-1\\CFX')
+            
+            #Determine the latest results file
+            files = os.listdir('.')
+            for fileName in files.reverse():  #Reversing the order because the files are listed lowest number to highest number and we want the highest number
+                if fileName.split('.')[-1] == 'res':
+                    resultsFile = fileName
+                    
+            #Write a session file
+            sessionFileName = 'Post' + str(designPoint) + '.cse'
+            self.writeSessionFile(sessionFileName)
+            
+            #Call CFD-Post on the results file
+            runSessionOnResultsFile(sessionFileName, resultsFile)
+            
+            #Return to the root directory
+            os.chdir(self.rootDir)
+        
+        
 
 ################################################################################
 
@@ -67,6 +181,24 @@ class SessionFile(object):
             
         newFile.close()
         
+class SessionSectionFromFile(object):
+    '''
+    Defines a section of a session file (Or an entire session file) by reading
+    it in from a file.
+    
+    File 'sectionFile' bust be present in the working directory when the object
+    is created.  After that, the object is portable and doesn't require the file.
+    '''
+    def __init__(self, sectionFile):
+        self.sectionFile = sectionFile
+        self.readSectionFile()
+        
+    def readSectionFile(self):
+        with open(self.sectionFile, 'rb') as sectionTextFile:
+            self.sectionFileData = sectionTextFile.read().splitlines()
+            
+    def getDefinition(self):
+        return self.sectionFileData
         
 class Chart(object):
     '''
