@@ -32,12 +32,18 @@ class SessionFile(object):
         self.sections = sections
         
     def addSection(self, section):
+        '''
+        Adds a section to the session file
+        '''
         if self.sections != None:
             self.sections.append(section)
         else:
             self.sections = [section]
         
     def getDefinition(self):
+        '''
+        Returns the defined session file as a list of lines (Without EOL markers)
+        '''
         sessionDef = [ 'COMMAND FILE:',
         '  CFX Post Version = 15.0',
         'END']
@@ -48,6 +54,10 @@ class SessionFile(object):
         return sessionDef
         
     def writeSessionFile(self, sessionFileName):
+        '''
+        Writes the defined session file to the current working directory.  This
+        session file is ready to be used with CFD-Post 'as is'
+        '''
         newFile = open(sessionFileName, 'wb')
         
         sessionFileText = self.getDefinition()
@@ -59,6 +69,10 @@ class SessionFile(object):
         
         
 class Chart(object):
+    '''
+    Defines a chart named 'name' in the session file.  The default x-axis and 
+    y-axis variables must be defined.
+    '''
     def __init__(self, name, xVariable='X', yVariable='Pressure'):
         self.name = name
         self.xVar = xVariable
@@ -67,11 +81,17 @@ class Chart(object):
         self.numOfSeries = 0
         
     def addSeries(self, seriesName, location):
+        '''
+        Adds a series to the chart. The 'location' should be a line object.
+        '''
         self.numOfSeries += 1
         seriesNum = self.numOfSeries
         self.series.append(Series(location, seriesName, seriesNum, self.xVar, self.yVar))
         
     def getDefinition(self):
+        '''
+        Returns the defined chart as a list of lines (Without EOL markers)
+        '''
         chartLinesOrder = ''
         
         for n in range(self.numOfSeries):
@@ -161,6 +181,11 @@ class Chart(object):
         return chartDef
         
 class Series(object):
+    '''
+    Defines a series object of name 'seriesName' and number 'seriesNumber'. The
+    location must be a line object. The xVariable and yVariable should be strings
+    corresponding to quantities in the CFD model.
+    '''
     def __init__(self, location, seriesName, seriesNumber, xVariable, yVariable):
         self.loc = location
         self.name = seriesName
@@ -169,6 +194,9 @@ class Series(object):
         self.yVar = yVariable
         
     def getDefinition(self):
+        '''
+        Returns the series object definition as a list of lines (Without EOL markers)
+        '''
         seriesDef = ['  CHART SERIES:Series ' + str(self.num),
         '    Chart Line Custom Data Selection = Off',
         '    Chart Line Filename =',
@@ -206,12 +234,20 @@ class Series(object):
         return seriesDef
         
 class Line(object):
+    '''
+    Defines a line object with name 'name'.  'point1' and 'point2' must be one
+    dimensional arrays of length 3 defining the location of each point in R3.
+    The line is defined as passing through the two points specified.
+    '''
     def __init__(self, name, point1, point2):
         self.name = name
         self.p1 = point1
         self.p2 = point2
         
     def getDefinition(self):
+        '''
+        Returns the line object definition as a list of lines (Without EOL markers)
+        '''
         p1String = str(self.p1[0]) + ' [m], ' + str(self.p1[1]) + ' [m], ' + str(self.p1[2]) + ' [m]'
         p2String = str(self.p2[0]) + ' [m], ' + str(self.p2[1]) + ' [m], ' + str(self.p2[2]) + ' [m]'
         lineDef = ['LINE:' + self.name,
@@ -255,12 +291,19 @@ class Line(object):
         return lineDef
         
 class Export(object):
+    '''
+    Defines an export object for the chart 'chartObj'. The exported data will be
+    saved to the location given by 'exportLocation'.
+    '''
     def __init__(self, chartObj, exportLocation, overwrite='On'):
         self.chart = chartObj
         self.loc = exportLocation
         self.overwrite = overwrite
         
     def getDefinition(self):
+        '''
+        Returns the export definition as a list of lines (Without EOL markers)
+        '''
         exportDef = [ 'EXPORT:',
         '  Export File = ' + self.loc,
         '  Export Chart Name = ' + self.chart.name,
