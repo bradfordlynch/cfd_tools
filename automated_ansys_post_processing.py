@@ -31,7 +31,8 @@ def runSessionOnResultsFile(sessionFileName, resultsFileName):
 class CaseSweep(object):
     '''
     Object defining a sweep of different CFD cases. The sweepDefinitionFile must
-    be a CSV file with a table of the cases that were run
+    be a CSV file with a table of the cases that were run; this can be copied 
+    directly from Ansys Workbench
     '''
     def __init__(self, sweepDefinitionFile, rootDirectory, modelName):
         self.sweepFile = sweepDefinitionFile
@@ -39,6 +40,7 @@ class CaseSweep(object):
         self.modelName = modelName
         self.sweepHeaders = {}
         self.sweepDict = {}
+        self.sweepCaseResults = {}
 
         #Read sweep definition file
         self.readSweepDefFile()
@@ -103,11 +105,11 @@ class CaseSweep(object):
             #Determine the working directory
             if designPoint == 'Current':
                 designPoint = 'dp0'
-                dpDir = self.rootDir + self.modelName + '_files'
+                dpDir = self.rootDir + '\\' + self.modelName + '_files'
                 
             else:
                 designPoint = designPoint.replace(' ', '').lower()
-                dpDir = self.rootDir + self.modelName + designPoint + '_files'
+                dpDir = self.rootDir + '\\' + self.modelName + '_' + designPoint + '_files'
                 
             #Change to the design point directory, then to the results directory
             os.chdir(dpDir)
@@ -115,7 +117,8 @@ class CaseSweep(object):
             
             #Determine the latest results file
             files = os.listdir('.')
-            for fileName in files.reverse():  #Reversing the order because the files are listed lowest number to highest number and we want the highest number
+            files.reverse()  #Reversing the order because the files are listed lowest number to highest number and we want the highest number
+            for fileName in files:
                 if fileName.split('.')[-1] == 'res':
                     resultsFile = fileName
                     
@@ -124,16 +127,154 @@ class CaseSweep(object):
             self.writeSessionFile(sessionFileName, dpIndex)
             
             #Call CFD-Post on the results file
+            print 'Processing Design Point ' + str(dpIndex)
             runSessionOnResultsFile(sessionFileName, resultsFile)
             
             #Return to the root directory
             os.chdir(self.rootDir)
+            
+            #Read results file
+            
+    def readResultFiles(self, designPointColumnName):
+        '''
+        Reads CSV result files into CaseResult objects
+        '''
+        #Sweep design points
+        for dpIndex in range(len(self.sweepDict[designPointColumnName])):
+            #Set the filename for the current design point
+            dpFileName = 'results_from_dp' + str(dpIndex) + '.csv'
+            
+            #Get the case setup for the design point
+            caseSetup = {}
+            for key in self.sweepDict.keys():
+                caseSetup[key] = self.sweepDict[key][dpIndex]
+                
+            self.sweepCaseResults[dpIndex] = CaseResult(caseSetup, dpFileName)
+            
+    def plotCaseResults(self, designPoint, dataset):
+        raise NotImplementedError
+            
         
+class FlapperDesignSweep(CaseSweep):
+    '''
+    This class is derived from CaseSweep and has a custom method
+    writeSessionFile that writes out a session file to collect results
+    that are specific to the analysis of a flapper valve
+    '''
+    def writeSessionFile(self, sessionFileName, dpIndex):
+        #Get the lift value for this case
+        #NOTE that the key for the lift has been hard coded
+        lift = self.sweepDict['P15 - lift'][dpIndex]
+        
+        #Create line objects to probe mesh quantities from
+        lines = []
+        numLines = 5
+        
+        for i in range(numLines):
+            name = 'layer' + str(i)
+            yPos = lift * (1 - float(i)/(float(numLines) + 1))
+            p1 = [0, yPos, 0]
+            p2 = [1, yPos, 0]
+            line = Line(name, p1, p2)
+            
+            lines.append(line)
+            
+        #Create a chart object to plot the data
+        probedData = Chart('Chart' + str(dpIndex), 'X', 'Pressure')
+        
+        #Add series for lines
+        for line in lines:
+            probedData.addSeries(line.name, line)
+            
+        #Create an export object
+        export = Export(probedData, self.rootDir + '\\results_from_dp' + str(dpIndex) + '.csv')
+            
+        #Create session list and then the session object
+        sessionList = []
+        sessionList.extend(lines)
+        sessionList.append(probedData)
+        sessionList.append(export)
+        session = SessionFile(sessionList)
+        
+        #Write the session file
+        session.writeSessionFile(sessionFileName)
+        
+################################################################################
+
+#Objects for viewing and processing case results
+
+################################################################################
+
+class CaseResult(object):
+    '''
+    Object with special methods for collecting and viewing results
+    of CFD runs
+    '''
+    def __init__(self, caseSetup, caseResultsFile):
+        self.caseSetup = caseSetup
+        self.results = {}
+        
+        self.readCaseResults(caseResultsFile)
+        
+    def readCaseResults(self, caseResultsFile):
+        caseResults = []
+        
+        with open(caseResultsFile, 'rb') as caseResultsCSV:
+            caseResultsReader = csv.reader(caseResultsCSV, delimiter=',')
+            for row in caseResultsReader:
+                caseResults.append(row)    
+        
+        i = 0
+        
+        while i < len(caseResults):
+            if caseResults[i] == []:
+                i += 1
+                
+            elif caseResults[i] == ['[Name]']:
+                datasetName = caseResults[i+1][0]
+                i += 2
+
+            elif caseResults[i] == ['[Data]']:
+                xHeaders = caseResults[i+1][0].split()
+                yHeaders = caseResults[i+1][1].split()
+                
+                self.results[datasetName] = Dataset(datasetName, xHeaders[0], xHeaders[2], yHeaders[0], yHeaders[2])
+                i += 2
+                
+            else:
+                try:
+                    x = float(caseResults[i][0])
+                    y = float(caseResults[i][1])
+                    self.results[datasetName].addDataPoint(x, y)
+                    i += 1
+                except ValueError:
+                    i += 1
+                     
+        
+class Dataset(object):
+    '''
+    Defines a dataset object with X and Y labels and data
+    '''
+    def __init__(self, name, xLabel, xUnit, yLabel, yUnit):
+        self.name = name
+        self.xLabel = xLabel
+        self.xUnit = xUnit
+        self.x = []
+        self.yLabel = yLabel
+        self.yUnit = yUnit
+        self.y = []
+        
+    def addDataPoint(self, x, y):
+        '''
+        Adds the data point (x, y) to the end of the dataset
+        '''
+        self.x.append(x)
+        self.y.append(y)
         
 
 ################################################################################
 
-#Objects for creating CFD-Post session files
+#Objects for creating Ansys CFD-Post session files
 
 ################################################################################
 
