@@ -162,7 +162,13 @@ class FlapperDesignSweep(CaseSweep):
     '''
     This class is derived from CaseSweep and has a custom method
     writeSessionFile that writes out a session file to collect results
-    that are specific to the analysis of a flapper valve
+    that are specific to the analysis of a flapper valve.
+    
+    The method is specialized further by relying on the parameter 'P16 - UseRe'
+    that tells Ansys to run a constant pressure drop (If UseRe = 0) or to run
+    a case with a specific Reynolds number (If UseRe = 1).  When saving results,
+    we want the range to be fixed for the constant pressure drop cases but scaled
+    for the constant Re cases.
     '''
     def writeSessionFile(self, sessionFileName, dpIndex):
         #Set the directory to save the results
@@ -179,9 +185,17 @@ class FlapperDesignSweep(CaseSweep):
         #by recording a session in CFD-Post where you orient the model accordingly
         session.addSection(View('View 1', [-2.69195e-006, 0.000327419, 0.00225109], 555.248, [-3.16153e-005, -0.000739617], [0, 0.707107, 0, 0.707107]))
         
-        #Add a pressure contour
+        #Set the location and filename of the pressure contour
         locToSaveContour = resultsDir + '\\pressure_contour_dp'+ str(dpIndex) + '.png'
-        session.addContour('Pressure Contour', 'symmetry', 'Pressure', locToSaveContour, contourRange=(0, 2000000.))
+        
+        #Determine which scale to use for the contour
+        if self.sweepDict['P16 - UseRe'][dpIndex] == 0:  #The key for the flag for constant pressure or Re is hard coded!
+            contourRange = (0, self.sweepDict['P17 - Pinlet'][dpIndex])  #The key for the flag for the inlet pressure is hard coded!
+        else:
+            contourRange = 'Local'
+        
+        #Add the pressure contour
+        session.addContour('Pressure Contour', 'symmetry', 'Pressure', locToSaveContour, contourRange=contourRange)
         
         #Add a velocity contour
         locToSaveContour = resultsDir + '\\velocity_contour_dp'+ str(dpIndex) + '.png'
