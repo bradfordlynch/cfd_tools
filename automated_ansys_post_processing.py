@@ -122,6 +122,9 @@ class CaseSweep(object):
                 if fileName.split('.')[-1] == 'res':
                     resultsFile = fileName
                     
+                    #Exit loop after finding the latest file
+                    break
+                    
             #Write a session file
             sessionFileName = 'Post' + str(designPoint) + '.cse'
             self.writeSessionFile(sessionFileName, dpIndex)
@@ -162,6 +165,28 @@ class FlapperDesignSweep(CaseSweep):
     that are specific to the analysis of a flapper valve
     '''
     def writeSessionFile(self, sessionFileName, dpIndex):
+        #Set the directory to save the results
+        resultsDir = self.rootDir + '\\sweepResults'
+        
+        #Create a new session file object
+        session = SessionFile([])
+        
+        #Hide model wireframe
+        session.addSection(VisibilityAction('/WIREFRAME:Wireframe', '/VIEW:View 1', 'hide'))
+        
+        #Orient view
+        #NOTE: This is highly dependent on your model. It is best to create this
+        #by recording a session in CFD-Post where you orient the model accordingly
+        session.addSection(View('View 1', [-2.69195e-006, 0.000327419, 0.00225109], 555.248, [-3.16153e-005, -0.000739617], [0, 0.707107, 0, 0.707107]))
+        
+        #Add a pressure contour
+        locToSaveContour = resultsDir + '\\pressure_contour_dp'+ str(dpIndex) + '.png'
+        session.addContour('Pressure Contour', 'symmetry', 'Pressure', locToSaveContour, contourRange=(0, 2000000.))
+        
+        #Add a velocity contour
+        locToSaveContour = resultsDir + '\\velocity_contour_dp'+ str(dpIndex) + '.png'
+        session.addContour('Velocity Contour', 'symmetry', 'Velocity', locToSaveContour)
+        
         #Get the lift value for this case
         #NOTE that the key for the lift has been hard coded
         lift = self.sweepDict['P15 - lift'][dpIndex]
@@ -169,10 +194,11 @@ class FlapperDesignSweep(CaseSweep):
         #Create line objects to probe mesh quantities from
         lines = []
         numLines = 5
+        dLift = lift/float(numLines)
         
         for i in range(numLines):
             name = 'layer' + str(i)
-            yPos = lift * (1 - float(i)/(float(numLines) + 1))
+            yPos = lift - dLift/2. - i*dLift
             p1 = [0, yPos, 0]
             p2 = [1, yPos, 0]
             line = Line(name, p1, p2)
@@ -187,14 +213,12 @@ class FlapperDesignSweep(CaseSweep):
             probedData.addSeries(line.name, line)
             
         #Create an export object
-        export = Export(probedData, self.rootDir + '\\results_from_dp' + str(dpIndex) + '.csv')
+        export = Export(probedData, resultsDir + '\\results_from_dp' + str(dpIndex) + '.csv')
             
-        #Create session list and then the session object
-        sessionList = []
-        sessionList.extend(lines)
-        sessionList.append(probedData)
-        sessionList.append(export)
-        session = SessionFile(sessionList)
+        #Create the session object
+        session.addSection(lines)
+        session.addSection(probedData)
+        session.addSection(export)
         
         #Write the session file
         session.writeSessionFile(sessionFileName)
@@ -207,8 +231,8 @@ class FlapperDesignSweep(CaseSweep):
 
 class CaseResult(object):
     '''
-    Object with special methods for collecting and viewing results
-    of CFD runs
+    Object with special methods for collecting and viewing results along a line
+    exported from Ansys CFD-Post
     '''
     def __init__(self, caseSetup, caseResultsFile):
         self.caseSetup = caseSetup
@@ -284,17 +308,17 @@ class SessionFile(object):
     file is defined by its respective object and should be added to the list of
     sections "self.sections".  Be default, this is initialized to None
     '''
-    def __init__(self, sections=None):
+    def __init__(self, sections=[]):
         self.sections = sections
         
     def addSection(self, section):
         '''
-        Adds a section to the session file
+        Adds a section or a list of sections to the session file
         '''
-        if self.sections != None:
+        if type(section) != list:
             self.sections.append(section)
         else:
-            self.sections = [section]
+            self.sections.extend(section)
         
     def getDefinition(self):
         '''
@@ -305,6 +329,7 @@ class SessionFile(object):
         'END']
         
         for section in self.sections:
+            sessionDef.extend([' '])
             sessionDef.extend(section.getDefinition())
             
         return sessionDef
@@ -322,6 +347,19 @@ class SessionFile(object):
             newFile.write(line + '\n')
             
         newFile.close()
+        
+    def addContour(self, name, location, variable, fileName, contourRange='Local', size=(1280, 1024)):
+        '''
+        Adds a contour of 'variable' on 'location' and saves it to disk at
+        'fileName'. Setting fileName = False will prevent saving of the contour
+        '''
+        #Create a contour of the variable
+        self.addSection(Contour(name, variable, location, contourRange))
+        
+        #Turn on the pressure contour, save a copy of it, then hide it
+        self.addSection(VisibilityAction('/CONTOUR:' + name, '/VIEW:View 1', 'show'))
+        self.addSection(Hardcopy(fileName, size))
+        self.addSection(VisibilityAction('/CONTOUR:' + name, '/VIEW:View 1', 'hide'))
         
 class SessionSectionFromFile(object):
     '''
@@ -413,7 +451,7 @@ class Chart(object):
         '  Default Time Variable Absolute Value = Off',
         '  Default Time Variable Boundary Values = Conservative',
         '  Default X Variable Absolute Value = Off',
-        '  Default X Variable Boundary Values = Hybrid',
+        '  Default X Variable Boundary Values = Conservative',
         '  Default Y Variable Absolute Value = Off',
         '  Default Y Variable Boundary Values = Conservative',
         '  FFT Full Input Range = On',
@@ -443,9 +481,11 @@ class Chart(object):
         '  Y Axis Logarithmic Scaling = Off']
         
         for serie in self.series:
+            chartDef.extend([' '])
             chartDef.extend(serie.getDefinition())
         
-        chartEnd = [ '  OBJECT REPORT OPTIONS:',
+        chartEnd = [' ',
+        '  OBJECT REPORT OPTIONS:',
         '    Report Caption =',
         '  END',
         'END']
@@ -564,6 +604,97 @@ class Line(object):
 
         return lineDef
         
+class Contour(object):
+    '''
+    Defines a contour object with name 'name', shaded based on 'variable' and
+    on 'location'. By default the contour range is set by the local minimum and
+    maximum values. A user specified range can be set by providing a tuple of
+    (rangeMin, rangeMax) for 'contourRange'
+    
+    NOTE: Only the variable types 'Pressure' and 'Velocity' are supported with
+    user-defined ranges
+    '''
+    def __init__(self, name, variable, location, contourRange='Local'):
+        self.name = name
+        self.var = variable
+        self.location = location
+        self.range = contourRange
+        
+    def getDefinition(self):
+        '''
+        Returns the contour object definition as a list of lines (Without EOL markers)
+        '''
+        if self.range == 'Local':
+            contourRangeStr = 'Local'
+            rangeMin = 0.0
+            rangeMax = 0.0
+        elif type(self.range) == tuple and len(self.range) == 2:
+            contourRangeStr = 'User Specified'
+            rangeMin, rangeMax = self.range
+        else:
+            raise ValueError('Variable contourRange must be "Local" or a tuple of the range min and max')
+            
+        if self.var == 'Pressure':
+            units = '[Pa]'
+        elif self.var == 'Velocity':
+            units = '[m s^-1]'
+        elif self.range != 'Local':
+            raise ValueError('Only the variables "Pressure" and "Velocity" are supported for user-defined ranges')
+        else:
+            units = '[m s^-1]'
+            
+        contourDef = ['CONTOUR:' + self.name,
+        '  Apply Instancing Transform = On',
+        '  Clip Contour = Off',
+        '  Colour Map = Default Colour Map',
+        '  Colour Scale = Linear',
+        '  Colour Variable = ' + self.var,
+        '  Colour Variable Boundary Values = Hybrid',
+        '  Constant Contour Colour = Off',
+        '  Contour Range = ' + contourRangeStr,
+        '  Culling Mode = No Culling',
+        '  Domain List = /DOMAIN GROUP:All Domains',
+        '  Draw Contours = On',
+        '  Font = Sans Serif',
+        '  Fringe Fill = On',
+        '  Instancing Transform = /DEFAULT INSTANCE TRANSFORM:Default Transform',
+        '  Lighting = On',
+        '  Line Colour = 0, 0, 0',
+        '  Line Colour Mode = Default',
+        '  Line Width = 1',
+        '  Location List = ' + self.location,
+        '  Max = ' + str(rangeMax) + ' ' + units,
+        '  Min = ' + str(rangeMin) + ' ' + units,
+        '  Number of Contours = 11',
+        '  Show Numbers = Off',
+        '  Specular Lighting = On',
+        '  Surface Drawing = Smooth Shading',
+        '  Text Colour = 0, 0, 0',
+        '  Text Colour Mode = Default',
+        '  Text Height = 0.024',
+        '  Transparency = 0.0',
+        '  Value List = 0 [m s^-1],1 [m s^-1]',
+        '  OBJECT VIEW TRANSFORM:',
+        '    Apply Reflection = Off',
+        '    Apply Rotation = Off',
+        '    Apply Scale = Off',
+        '    Apply Translation = Off',
+        '    Principal Axis = Z',
+        '    Reflection Plane Option = XY Plane',
+        '    Rotation Angle = 0.0 [degree]',
+        '    Rotation Axis From = 0 [m], 0 [m], 0 [m]',
+        '    Rotation Axis To = 0 [m], 0 [m], 0 [m]',
+        '    Rotation Axis Type = Principal Axis',
+        '    Scale Vector = 1 , 1 , 1',
+        '    Translation Vector = 0 [m], 0 [m], 0 [m]',
+        '    X = 0.0 [m]',
+        '    Y = 0.0 [m]',
+        '    Z = 0.0 [m]',
+        '  END',
+        'END']
+        
+        return  contourDef
+        
 class Export(object):
     '''
     Defines an export object for the chart 'chartObj'. The exported data will be
@@ -586,3 +717,77 @@ class Export(object):
         '>export chart',]
         
         return exportDef
+        
+class Hardcopy(object):
+    '''
+    Defines a hardcopy object which is responsible for saving the viewport to an
+    image file such as a png
+    
+    fileName must be the path to save the file, such as 'C:/Users/foo/Pressure.png'
+    imageSize must be a tuple of list of the image width, height
+    '''
+    def __init__(self, fileName, imageSize):
+        self.fileName = fileName
+        self.imageSize = imageSize
+        
+    def getDefinition(self):
+        hardcopyDef = [ 'HARDCOPY:',
+        '  Antialiasing = On',
+        '  Hardcopy Filename = ' + self.fileName,
+        '  Hardcopy Format = png',
+        '  Hardcopy Tolerance = 0.0001',
+        '  Image Height = ' + str(self.imageSize[1]),
+        '  Image Scale = 100',
+        '  Image Width = ' + str(self.imageSize[0]),
+        '  JPEG Image Quality = 100',
+        '  Screen Capture = Off',
+        '  Use Screen Size = Off',
+        '  White Background = On',
+        'END',
+        '>print']
+        
+        return hardcopyDef
+
+class View(object):
+    def __init__(self, name, pivotPoint, scale, pan, rotation):
+        self.name = name
+        self.pivot = pivotPoint
+        self.scale = scale
+        self.pan = pan
+        self.rot = rotation
+        
+    def getDefinition(self):
+        viewDef = [ 'VIEW:' + self.name,
+        '  Camera Mode = User Specified',
+        '  CAMERA:',
+        '    Option = Pivot Point and Quaternion',
+        '    Pivot Point = ' + str(self.pivot)[1:-1],  #Is a list, so we need to slice of the brackets
+        '    Scale = ' + str(self.scale),
+        '    Pan = ' + str(self.pan)[1:-1],  #Is a list, so we need to slice of the brackets
+        '    Rotation Quaternion = ' + str(self.rot)[1:-1],  #Is a list, so we need to slice of the brackets
+        '  END',
+        '  ',
+        'END']
+        
+        return viewDef
+
+class VisibilityAction(object):
+    '''
+    Defines a visibility action for the CFD-Post viewport. 'graphicsObject' must
+    be an object defined in CFD-Post such as '/CONTOUR:Pressure Contour' and 
+    'view' must be a view or figure such as '/VIEW:View 1'. 'viewStatus' must
+    be set to 'show' or 'hide'
+    '''
+    def __init__(self, graphicsObject, view, viewStatus):
+        self.gfxObj = graphicsObject
+        self.view = view
+        self.viewStatus = viewStatus
+        
+    def getDefinition(self):
+        '''
+        Returns the view definition as a list of lines (Without EOL markers)
+        '''
+        viewDef = ['# Sending visibility action from ViewUtilities',
+        '>' + self.viewStatus + ' ' + self.gfxObj + ', view=' + self.view]
+        
+        return viewDef
